@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package routing;
+
+message Route {
+  int64 next_hop = 1;
+  double metric = 2;
+}
+
+message RouteTable {
+  map<uint64, Route> routes = 1;
+}
+
+message TargetedRoute {
+  uint64 target_group = 1;
+  Route route = 2;
+}
+
+message UpdateMessage {
+  uint64 update_number = 1;
+  uint64 source_node = 2;
+  oneof update {
+    TargetedRoute route_update = 3;
+    RouteTable route_table_update = 4;
+  }
+}
