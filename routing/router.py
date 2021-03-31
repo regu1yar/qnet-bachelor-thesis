@@ -77,6 +77,7 @@ class Router:
     def restart_scattering(self) -> None:
         self.__scatter_rt_timer = RandomShiftedRepeater(
             self.SCATTER_RT_TIMEOUT,
+            -self.MAX_TIMER_SHIFT,
             self.MAX_TIMER_SHIFT,
             self.__scatter_rt_callback
         )
