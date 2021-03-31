@@ -38,6 +38,7 @@ class Router:
             source_node=self.__id,
             update=self.__route_table,
         )
+        self.__update_number += 1
         await self.__scatterer.scatter(update.SerializeToString())
 
     def stop_scattering(self):
