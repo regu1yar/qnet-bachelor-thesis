@@ -65,6 +65,7 @@ class Router:
         for group, route in self.__route_table.routes.items():
             if route.next_hop not in self.__alive_nodes:
                 self.__set_naive_route(group)
+                await self.__scatter_emergency_update(group)
 
         self.__alive_nodes.clear()
         self.__alive_nodes.add(self.__id)
@@ -115,10 +116,16 @@ class Router:
             old_metric = current_route.metric
             current_route.metric = proposed_metric
             if old_metric - current_route.metric >= self.__metric_service.get_emergency_metric_delta():
-                emergency_update = routing_pb2.UpdateMessage(
-                    rt_version=self.__rt_version,
-                    source_node=self.__id,
-                    route_update=routing_pb2.TargetedRoute(target_group=target_group, route=current_route),
-                )
-                self.__rt_version += 1
-                await self.__scatterer.scatter(emergency_update.SerializeToString())
+                await self.__scatter_emergency_update(target_group)
+
+    async def __scatter_emergency_update(self, target_group: int) -> None:
+        emergency_update = routing_pb2.UpdateMessage(
+            rt_version=self.__rt_version,
+            source_node=self.__id,
+            route_update=routing_pb2.TargetedRoute(
+                target_group=target_group,
+                route=self.__route_table.routes[target_group]
+            ),
+        )
+        self.__rt_version += 1
+        await self.__scatterer.scatter(emergency_update.SerializeToString())
