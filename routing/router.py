@@ -6,9 +6,9 @@ import typing as tp
 
 
 class Router:
-    SCATTER_RT_TIMEOUT = 25
-    MAX_TIMER_SHIFT = 10
-    KEEPALIVE_TIMEOUT = (SCATTER_RT_TIMEOUT + (MAX_TIMER_SHIFT + 1) // 2) * 3
+    SCATTER_RT_TIMEOUT = 30
+    MAX_TIMER_SHIFT = 5
+    KEEPALIVE_TIMEOUT = SCATTER_RT_TIMEOUT * 3
 
     def __init__(self, node_id: int, groups: tp.Dict[int, tp.Set[int]],
                  metric_service: MetricService, scatterer: Scatterer):
@@ -19,8 +19,8 @@ class Router:
         self.__metric_service = metric_service
         self.__scatterer = scatterer
 
-        self.__alive_nodes: tp.Set[int] = set()
-        self.__alive_nodes.add(self.__id)
+        self.__available_nodes: tp.Set[int] = set()
+        self.__available_nodes.add(self.__id)
 
         self.__rt_version = 0
         self.__last_seen_rt_versions: tp.Dict[int, tp.Dict[int, int]] = {}
@@ -31,10 +31,11 @@ class Router:
 
         self.__scatter_rt_timer = RandomShiftedRepeater(
             self.SCATTER_RT_TIMEOUT,
+            -self.MAX_TIMER_SHIFT,
             self.MAX_TIMER_SHIFT,
             self.__scatter_rt_callback
         )
-        self.__check_aliveness_timer = Repeater(self.KEEPALIVE_TIMEOUT, self.__check_aliveness_callback)
+        self.__availability_checker = Repeater(self.KEEPALIVE_TIMEOUT, self.__availability_checker_callback)
 
     def __set_naive_route(self, target_group_id: int) -> None:
         if target_group_id == self.__group:
@@ -61,14 +62,14 @@ class Router:
         self.__rt_version += 1
         await self.__scatterer.scatter(update.SerializeToString())
 
-    async def __check_aliveness_callback(self) -> None:
+    async def __availability_checker_callback(self) -> None:
         for group, route in self.__route_table.routes.items():
-            if route.next_hop not in self.__alive_nodes:
+            if route.next_hop not in self.__available_nodes:
                 self.__set_naive_route(group)
                 await self.__scatter_emergency_update(group)
 
-        self.__alive_nodes.clear()
-        self.__alive_nodes.add(self.__id)
+        self.__available_nodes.clear()
+        self.__available_nodes.add(self.__id)
 
     def stop_scattering(self) -> None:
         self.__scatter_rt_timer.cancel()
@@ -87,7 +88,7 @@ class Router:
             return self.__route_table.routes[target_group].next_hop
 
     async def handle_update(self, update_message: routing_pb2.UpdateMessage) -> None:
-        self.__alive_nodes.add(update_message.source_node)
+        self.__available_nodes.add(update_message.source_node)
         if update_message.HasField('route_update'):
             await self.__update_route(
                 update_message.route_update.target_group,
