@@ -18,8 +18,8 @@ class Router:
         self.__alive_nodes = set()
         self.__alive_nodes.add(self.__id)
 
-        self.__update_number = 0
-        self.__last_seen_updates = {}
+        self.__rt_version = 0
+        self.__last_seen_rt_versions = {}
 
         self.__route_table = routing_pb2.RouteTable()
         for group_id in self.__groups:
@@ -50,11 +50,11 @@ class Router:
 
     async def __scatter_rt_callback(self):
         update = routing_pb2.UpdateMessage(
-            update_number=self.__update_number,
+            rt_version=self.__rt_version,
             source_node=self.__id,
             update=self.__route_table,
         )
-        self.__update_number += 1
+        self.__rt_version += 1
         await self.__scatterer.scatter(update.SerializeToString())
 
     async def __check_aliveness_callback(self):
@@ -88,17 +88,18 @@ class Router:
                 update_message.route_update.target_group,
                 update_message.source_node,
                 update_message.route_update.route,
-                update_message.update_number
+                update_message.rt_version
             )
         elif update_message.HasField('route_table_update'):
             for group, route in update_message.route_table_update.routes.items():
-                await self.__update_route(group, update_message.source_node, route, update_message.update_number)
+                await self.__update_route(group, update_message.source_node, route, update_message.rt_version)
 
-    async def __update_route(self, target_group, proposed_next_hop, proposed_route, update_number):
-        if self.__last_seen_updates[target_group][proposed_next_hop] > update_number:
+    async def __update_route(self, target_group, proposed_next_hop, proposed_route, rt_version):
+        if proposed_next_hop in self.__last_seen_rt_versions[target_group] and \
+                self.__last_seen_rt_versions[target_group][proposed_next_hop] > rt_version:
             return
         else:
-            self.__last_seen_updates[target_group][proposed_next_hop] = update_number
+            self.__last_seen_rt_versions[target_group][proposed_next_hop] = rt_version
 
         current_route = self.__route_table.routes[target_group]
         proposed_metric = proposed_route.metric + self.__metric_service.get_direct_metric(proposed_next_hop)
@@ -110,9 +111,9 @@ class Router:
             current_route.metric = proposed_metric
             if old_metric - current_route.metric >= self.__metric_service.get_emergency_metric_delta():
                 emergency_update = routing_pb2.UpdateMessage(
-                    update_number=self.__update_number,
+                    rt_version=self.__rt_version,
                     source_node=self.__id,
                     update=routing_pb2.TargetedRoute(target_group=target_group, route=current_route),
                 )
-                self.__update_number += 1
+                self.__rt_version += 1
                 await self.__scatterer.scatter(emergency_update.SerializeToString())

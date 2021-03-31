@@ -17,7 +17,7 @@ message TargetedRoute {
 }
 
 message UpdateMessage {
-  uint64 update_number = 1;
+  uint64 rt_version = 1;
   uint64 source_node = 2;
   oneof update {
     TargetedRoute route_update = 3;
