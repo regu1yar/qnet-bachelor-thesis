@@ -2,8 +2,8 @@ import asyncio
 
 
 class Scatterer:
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
-    async def scatter(self, data):
+    async def scatter(self, data: bytes) -> None:
         pass
