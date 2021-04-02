@@ -1,8 +1,10 @@
+from functools import partial
+import typing as tp
+
 from . import routing_pb2
 from .repeater import RandomShiftedRepeater, Repeater
 from .metrics import MetricService
 from .scatter import Scatterer
-import typing as tp
 
 
 class Router:
@@ -33,7 +35,7 @@ class Router:
             self.SCATTER_RT_TIMEOUT,
             -self.MAX_TIMER_SHIFT,
             self.MAX_TIMER_SHIFT,
-            self.__scatter_rt_callback
+            partial(self.__scatter_rt_callback, self.__route_table.routes)
         )
         self.__availability_checker = Repeater(self.KEEPALIVE_TIMEOUT, self.__availability_checker_callback)
 
@@ -57,17 +59,19 @@ class Router:
         update = routing_pb2.UpdateMessage(
             rt_version=self.__rt_version,
             source_node=self.__id,
-            route_table_update=self.__route_table,
+            updated_routes=self.__route_table.routes,
         )
         self.__rt_version += 1
         await self.__scatterer.scatter(update.SerializeToString())
 
     async def __availability_checker_callback(self) -> None:
+        reset_routes: tp.Dict[int, routing_pb2.Route] = {}
         for group, route in self.__route_table.routes.items():
             if route.next_hop not in self.__available_nodes:
                 self.__set_naive_route(group)
-                await self.__scatter_emergency_update(group)
+                reset_routes[group] = self.__route_table.routes[group]
 
+        await self.__scatter_updates(reset_routes)
         self.__available_nodes.clear()
         self.__available_nodes.add(self.__id)
 
@@ -90,19 +94,15 @@ class Router:
 
     async def handle_update(self, update_message: routing_pb2.UpdateMessage) -> None:
         self.__available_nodes.add(update_message.source_node)
-        if update_message.HasField('route_update'):
-            await self.__update_route(
-                update_message.route_update.target_group,
-                update_message.source_node,
-                update_message.route_update.route,
-                update_message.rt_version
-            )
-        elif update_message.HasField('route_table_update'):
-            for group, route in update_message.route_table_update.routes.items():
-                await self.__update_route(group, update_message.source_node, route, update_message.rt_version)
+        emergency_updates: tp.Dict[int, routing_pb2.Route] = {}
+        for group, route in update_message.updated_routes.items():
+            self.__update_route(group, update_message.source_node, route, update_message.rt_version, emergency_updates)
 
-    async def __update_route(self, target_group: int, proposed_next_hop: int,
-                             proposed_route: routing_pb2.Route, rt_version: int) -> None:
+        await self.__scatter_updates(emergency_updates)
+
+    def __update_route(self, target_group: int, proposed_next_hop: int,
+                       proposed_route: routing_pb2.Route, rt_version: int,
+                       emergency_updates: tp.Dict[int, routing_pb2.Route]) -> None:
         if proposed_next_hop in self.__last_seen_rt_versions[target_group] and \
                 self.__last_seen_rt_versions[target_group][proposed_next_hop] > rt_version:
             return
@@ -118,16 +118,13 @@ class Router:
             old_metric = current_route.metric
             current_route.metric = proposed_metric
             if old_metric - current_route.metric >= self.__metric_service.get_emergency_metric_delta():
-                await self.__scatter_emergency_update(target_group)
+                emergency_updates[target_group] = current_route
 
-    async def __scatter_emergency_update(self, target_group: int) -> None:
+    async def __scatter_updates(self, updated_routes: tp.Dict[int, routing_pb2.Route]) -> None:
         emergency_update = routing_pb2.UpdateMessage(
             rt_version=self.__rt_version,
             source_node=self.__id,
-            route_update=routing_pb2.TargetedRoute(
-                target_group=target_group,
-                route=self.__route_table.routes[target_group]
-            ),
+            updated_routes=updated_routes,
         )
         self.__rt_version += 1
         await self.__scatterer.scatter(emergency_update.SerializeToString())

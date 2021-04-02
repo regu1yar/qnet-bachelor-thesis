@@ -11,16 +11,8 @@ message RouteTable {
   map<uint64, Route> routes = 1;
 }
 
-message TargetedRoute {
-  uint64 target_group = 1;
-  Route route = 2;
-}
-
 message UpdateMessage {
   uint64 rt_version = 1;
   uint64 source_node = 2;
-  oneof update {
-    TargetedRoute route_update = 3;
-    RouteTable route_table_update = 4;
-  }
+  map<uint64, Route> updated_routes = 3;
 }
