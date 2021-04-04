@@ -105,11 +105,16 @@ class Router:
 
         current_route = self.__route_table.routes[target_group]
         proposed_metric = proposed_route.metric + self.__metric_service.get_direct_metric(proposed_next_hop)
+        old_metric = current_route.metric
         if proposed_metric < current_route.metric:
             current_route.next_hop = proposed_next_hop
             current_route.metric = proposed_metric
         elif current_route.next_hop == proposed_next_hop:
-            old_metric = current_route.metric
             current_route.metric = proposed_metric
-            if old_metric - current_route.metric >= self.__metric_service.get_emergency_metric_delta():
-                emergency_updates[target_group] = current_route
+
+        if abs(old_metric - current_route.metric) >= self.__get_emergency_metric_delta():
+            emergency_updates[target_group] = current_route
+
+    def __get_emergency_metric_delta(self) -> float:
+        pass
+
