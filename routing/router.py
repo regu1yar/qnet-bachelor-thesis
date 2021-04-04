@@ -21,9 +21,6 @@ class Router:
         self.__metric_service = metric_service
         self.__scatterer = scatterer
 
-        self.__available_nodes: tp.Set[int] = set()
-        self.__available_nodes.add(self.__id)
-
         self.__rt_version = 0
         self.__last_seen_rt_versions: tp.Dict[int, tp.Dict[int, int]] = {}
 
@@ -67,13 +64,11 @@ class Router:
     async def __availability_checker_callback(self) -> None:
         reset_routes: tp.Dict[int, routing_pb2.Route] = {}
         for group, route in self.__route_table.routes.items():
-            if route.next_hop not in self.__available_nodes:
+            if not self.__metric_service.is_node_available(route.next_hop):
                 self.__set_naive_route(group)
                 reset_routes[group] = self.__route_table.routes[group]
 
         await self.__scatter_updates(reset_routes)
-        self.__available_nodes.clear()
-        self.__available_nodes.add(self.__id)
 
     def stop_scattering(self) -> None:
         self.__scatter_rt_timer.cancel()
@@ -93,7 +88,6 @@ class Router:
             return self.__route_table.routes[target_group].next_hop
 
     async def handle_update(self, update_message: routing_pb2.UpdateMessage) -> None:
-        self.__available_nodes.add(update_message.source_node)
         emergency_updates: tp.Dict[int, routing_pb2.Route] = {}
         for group, route in update_message.updated_routes.items():
             self.__update_route(group, update_message.source_node, route, update_message.rt_version, emergency_updates)
