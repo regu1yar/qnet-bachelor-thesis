@@ -10,7 +10,7 @@ from .scatter import Scatterer
 class Router:
     SCATTER_RT_TIMEOUT = 30
     MAX_TIMER_SHIFT = 5
-    KEEPALIVE_TIMEOUT = SCATTER_RT_TIMEOUT * 3
+    KEEPALIVE_TIMEOUT = SCATTER_RT_TIMEOUT
 
     def __init__(self, node_id: int, groups: tp.Dict[int, tp.Set[int]],
                  metric_service: MetricService, scatterer: Scatterer):
@@ -117,4 +117,3 @@ class Router:
 
     def __get_emergency_metric_delta(self) -> float:
         pass
-

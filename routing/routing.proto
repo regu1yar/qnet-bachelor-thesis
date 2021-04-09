@@ -16,3 +16,8 @@ message UpdateMessage {
   uint64 source_node = 2;
   map<uint64, Route> updated_routes = 3;
 }
+
+message ScatterMessage {
+  repeated uint64 dest_groups = 1;
+  bytes data = 2;
+}
