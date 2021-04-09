@@ -7,6 +7,3 @@ class Config:
 
     def get_ip_addr_by_node_id(self, node_id: int) -> str:
         pass
-
-    def get_app_port(self) -> int:
-        pass

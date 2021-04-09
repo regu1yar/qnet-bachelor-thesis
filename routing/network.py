@@ -2,13 +2,16 @@ import asyncio
 import typing as tp
 
 
-class Handler:
+class DataHandler:
+    def __init__(self) -> None:
+        pass
+
     async def handle(self, data: bytes) -> None:
         pass
 
 
 class UDPServer(asyncio.DatagramProtocol):
-    def __init__(self, handler: Handler) -> None:
+    def __init__(self, handler: DataHandler) -> None:
         self.__handler = handler
         self.__transport: tp.Optional[asyncio.transports.DatagramTransport] = None
 

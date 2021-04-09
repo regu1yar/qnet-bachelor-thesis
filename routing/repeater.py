@@ -19,7 +19,8 @@ class Repeater:
 
 
 class RandomShiftedRepeater:
-    def __init__(self, timeout: int, min_timeout_shift: int, max_timeout_shift: int, callback: tp.Callable[[], tp.Awaitable[None]]):
+    def __init__(self, timeout: int, min_timeout_shift: int, max_timeout_shift: int,
+                 callback: tp.Callable[[], tp.Awaitable[None]]):
         self.__timeout = timeout
         self.__min_timeout_shift = min_timeout_shift
         self.__max_timeout_shift = max_timeout_shift
