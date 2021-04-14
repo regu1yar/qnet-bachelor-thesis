@@ -8,6 +8,7 @@ from .repeater import RandomShiftedRepeater, Repeater
 from .metrics import MetricService
 from .scatter import Scatterer
 from .network import DataHandler, UDPServer
+from .net_config import Config
 
 
 class Router:
@@ -17,12 +18,11 @@ class Router:
 
     ROUTER_SERVER_PORT = 4200
 
-    def __init__(self, node_id: int, groups: tp.Dict[int, tp.Set[int]],
-                 metric_service: MetricService, scatterer: Scatterer):
-        self.__id = node_id
-        self.__group: tp.Optional[int] = None
+    def __init__(self, config: Config, metric_service: MetricService, scatterer: Scatterer):
+        self.__id = config.get_local_node_id()
+        self.__group = config.get_local_group_id()
 
-        self.__groups = groups
+        self.__groups = config.get_groups_to_nodes_dict()
         self.__metric_service = metric_service
         self.__scatterer = scatterer
 
@@ -30,6 +30,7 @@ class Router:
         self.__last_seen_rt_versions: tp.Dict[int, tp.Dict[int, int]] = {}
 
         self.__route_table = routing_pb2.RouteTable()
+        self.__route_table.routes[self.__group] = routing_pb2.Route(next_hop=-1, metric=0)
         for group_id in self.__groups:
             self.__set_naive_route(group_id)
 
@@ -50,11 +51,6 @@ class Router:
 
         best_direct_metric: tp.Optional[float] = None
         for node in self.__groups[target_group_id]:
-            if node == self.__id and self.__group is None:
-                self.__route_table.routes[target_group_id] = routing_pb2.Route(next_hop=-1, metric=0)
-                self.__group = target_group_id
-                return
-
             direct_metric = self.__metric_service.get_direct_metric(node)
             if best_direct_metric is None or best_direct_metric > direct_metric:
                 best_direct_metric = direct_metric

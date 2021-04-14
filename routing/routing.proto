@@ -20,4 +20,5 @@ message UpdateMessage {
 message ScatterMessage {
   repeated uint64 dest_groups = 1;
   bytes data = 2;
+  int64 ttl = 3;
 }
