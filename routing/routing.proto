@@ -5,20 +5,23 @@ package routing;
 message Route {
   int64 next_hop = 1;
   double metric = 2;
+  uint64 length = 3;
 }
 
 message RouteTable {
   map<uint64, Route> routes = 1;
 }
 
-message UpdateMessage {
-  uint64 rt_version = 1;
-  uint64 source_node = 2;
-  map<uint64, Route> updated_routes = 3;
+message RouteUpdateMessage {
+  uint64 source_node = 1;
+  map<uint64, Route> updated_routes = 2;
 }
 
 message ScatterMessage {
-  repeated uint64 dest_groups = 1;
-  bytes data = 2;
-  int64 ttl = 3;
+  bytes data = 1;
+  int64 ttl = 2;
+  string topic = 3;
+  uint64 source_node = 4;
+  uint64 topic_version = 5;
+  int64 last_group = 6;
 }
