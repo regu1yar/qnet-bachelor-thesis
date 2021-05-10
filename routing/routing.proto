@@ -23,5 +23,5 @@ message ScatterMessage {
   string topic = 3;
   uint64 source_node = 4;
   uint64 topic_version = 5;
-  int64 last_group = 6;
+  repeated uint64 dest_groups = 6;
 }
