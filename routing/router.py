@@ -55,9 +55,8 @@ class Router:
                 )
 
     async def __scatter_updates(self, updated_routes: tp.Dict[int, routing_pb2.Route]) -> None:
-        update_message = routing_pb2.RouteUpdateMessage(
-            source_node=self.__id,
-            updated_routes=updated_routes,
+        update_message = routing_pb2.RouteTable(
+            routes=updated_routes,
         )
         await self.__scatterer.scatter_global(update_message.SerializeToString(), self.ROUTE_UPDATES_TOPIC)
 
@@ -79,10 +78,10 @@ class Router:
         else:
             return self.__route_table.routes[target_group].next_hop
 
-    async def handle_update(self, update_message: routing_pb2.RouteUpdateMessage) -> None:
+    async def handle_update(self, updated_routes: routing_pb2.RouteTable, source_node: int) -> None:
         emergency_updates: tp.Dict[int, routing_pb2.Route] = {}
-        for group, route in update_message.updated_routes.items():
-            self.__update_route(group, update_message.source_node, route, emergency_updates)
+        for group, route in updated_routes.routes.items():
+            self.__update_route(group, source_node, route, emergency_updates)
 
         await self.__scatter_updates(emergency_updates)
 
@@ -114,10 +113,10 @@ class RouterHandler(MessageHandlerStrategy):
         super().__init__()
         self.__router = router
 
-    async def handle(self, data: bytes) -> None:
-        update_message = routing_pb2.RouteUpdateMessage()
+    async def handle(self, data: bytes, source_node: int) -> None:
+        update_message = routing_pb2.RouteTable()
         try:
             update_message.ParseFromString(data)
-            await self.__router.handle_update(update_message)
+            await self.__router.handle_update(update_message, source_node)
         except DecodeError:
             print('Can\'t parse UpdateMessage from data:', data)

@@ -12,9 +12,14 @@ message RouteTable {
   map<uint64, Route> routes = 1;
 }
 
-message RouteUpdateMessage {
-  uint64 source_node = 1;
-  map<uint64, Route> updated_routes = 2;
+enum NeighbourState {
+  OTHER = 0;
+  REDUCER = 1;
+  BACKUP_REDUCER = 2;
+}
+
+message HeartbeatMessage {
+  NeighbourState state = 1;
 }
 
 message ScatterMessage {

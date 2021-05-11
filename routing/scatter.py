@@ -10,7 +10,7 @@ from .network import DataHandler, UDPServer
 
 
 class MessageHandlerStrategy:
-    async def handle(self, data: bytes) -> None:
+    async def handle(self, data: bytes, source_node: int) -> None:
         pass
 
 
@@ -111,7 +111,7 @@ class Scatterer:
             return
 
         if message.topic in self.__message_handlers:
-            await self.__message_handlers[message.topic].handle(message.data)
+            await self.__message_handlers[message.topic].handle(message.data, message.source_node)
 
         self.__last_seen_topic_versions[message.topic][message.source_node] = message.topic_version
         next_hops: tp.Dict[int, routing_pb2.ScatterMessage] = {}
