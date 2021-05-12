@@ -5,7 +5,7 @@ from . import routing_pb2
 from .net_config import Config
 from .repeater import RandomShiftedRepeater, Repeater
 from .scatter import Scatterer
-from .routing_pb2 import REDUCER, BACKUP_REDUCER
+from .routing_pb2 import OTHER, REDUCER, BACKUP_REDUCER
 
 
 class ReducerDesignator:
@@ -32,7 +32,7 @@ class ReducerDesignator:
         self.__availability_checker = Repeater(self.__DEAD_TIMEOUT, self.__check_availability)
 
     async def __send_heartbeat(self) -> None:
-        heartbeat = routing_pb2.HeartbeatMessage(state=routing_pb2.OTHER)
+        heartbeat = routing_pb2.HeartbeatMessage(state=OTHER)
         if self.__id == self.__reducer:
             heartbeat.state = REDUCER
         elif self.__id == self.__backup_reducer:
@@ -55,9 +55,18 @@ class ReducerDesignator:
         if heartbeat.state == REDUCER:
             if self.__reducer < source_node:
                 self.__reducer = source_node
+                if self.__reducer == self.__backup_reducer:
+                    self.__backup_reducer = -1
         elif heartbeat.state == BACKUP_REDUCER:
             if self.__backup_reducer < source_node:
                 self.__backup_reducer = source_node
+                if self.__reducer == self.__backup_reducer:
+                    self.__reducer = -1
+        elif heartbeat.state == OTHER:
+            if self.__reducer == source_node:
+                self.__reducer = -1
+            elif self.__backup_reducer == source_node:
+                self.__backup_reducer = -1
 
     async def __reelect(self) -> None:
         available_nodes = self.__received_heartbeats.keys()
