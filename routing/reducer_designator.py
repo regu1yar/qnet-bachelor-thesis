@@ -3,7 +3,7 @@ import typing as tp
 
 from . import routing_pb2
 from .net_config import Config
-from .repeater import RandomShiftedRepeater, Repeater
+from .repeater import Repeater
 from .scatter import Scatterer
 from .routing_pb2 import OTHER, REDUCER, BACKUP_REDUCER
 
@@ -11,7 +11,6 @@ from .routing_pb2 import OTHER, REDUCER, BACKUP_REDUCER
 class ReducerDesignator:
     __SEND_HEARTBEAT_TIMEOUT = 10
     __DEAD_TIMEOUT = __SEND_HEARTBEAT_TIMEOUT * 3
-    __MAX_TIMER_SHIFT = 3
 
     HEARTBEAT_TOPIC = 'heartbeat'
 
@@ -22,13 +21,7 @@ class ReducerDesignator:
         self.__backup_reducer = -1
         self.__received_heartbeats: tp.Dict[int, routing_pb2.HeartbeatMessage] = {}
 
-        self.__heartbeat_timer = RandomShiftedRepeater(
-            self.__SEND_HEARTBEAT_TIMEOUT,
-            -self.__MAX_TIMER_SHIFT,
-            self.__MAX_TIMER_SHIFT,
-            self.__send_heartbeat
-        )
-
+        self.__heartbeat_timer = Repeater(self.__SEND_HEARTBEAT_TIMEOUT, self.__send_heartbeat)
         self.__availability_checker = Repeater(self.__DEAD_TIMEOUT, self.__check_availability)
 
     async def __send_heartbeat(self) -> None:
@@ -42,10 +35,6 @@ class ReducerDesignator:
 
     async def __check_availability(self) -> None:
         if self.__reducer not in self.__received_heartbeats or self.__backup_reducer not in self.__received_heartbeats:
-            if self.__reducer not in self.__received_heartbeats:
-                self.__reducer = self.__backup_reducer
-                self.__backup_reducer = -1
-
             await self.__reelect()
 
         self.__received_heartbeats.clear()
@@ -69,7 +58,17 @@ class ReducerDesignator:
                 self.__backup_reducer = -1
 
     async def __reelect(self) -> None:
+        if self.__reducer not in self.__received_heartbeats:
+            self.__reducer = self.__backup_reducer
+            self.__backup_reducer = -1
+
         available_nodes = self.__received_heartbeats.keys()
+        if len(available_nodes) <= 1:
+            self.__reducer = self.__id
+            self.__backup_reducer = --1
+            await self.__send_heartbeat()
+            return
+
         possible_backups = set(filter(
             lambda node: self.__received_heartbeats[node].state != REDUCER and node != self.__reducer,
             available_nodes,
