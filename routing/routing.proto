@@ -20,6 +20,7 @@ enum NeighbourState {
 
 message HeartbeatMessage {
   NeighbourState state = 1;
+  uint64 start_ts = 2;
 }
 
 message ScatterMessage {
@@ -27,6 +28,6 @@ message ScatterMessage {
   int64 ttl = 2;
   string topic = 3;
   uint64 source_node = 4;
-  uint64 topic_version = 5;
+  uint64 timestamp = 5;
   repeated uint64 dest_groups = 6;
 }

@@ -4,7 +4,7 @@ import typing as tp
 from google.protobuf.message import DecodeError
 
 from . import routing_pb2
-from .repeater import RandomShiftedRepeater, Repeater
+from .timer import RandomShiftedRepeater, Repeater
 from .metrics import MetricService
 from .scatter import Scatterer, MessageHandlerStrategy
 from .net_config import Config

@@ -1,4 +1,5 @@
 import asyncio
+import time
 import typing as tp
 from google.protobuf.message import DecodeError
 
@@ -32,8 +33,7 @@ class Scatterer:
 
         self.__router: tp.Optional[Router] = None
 
-        self.__topic_versions: tp.Dict[str, int] = {}
-        self.__last_seen_topic_versions: tp.Dict[str, tp.Dict[int, int]] = {}
+        self.__last_seen_topics_ts: tp.Dict[str, tp.Dict[int, int]] = {}
 
         self.__transport: tp.Optional[asyncio.BaseTransport] = None
         self.__run_server_task = asyncio.create_task(self.__run_server())
@@ -80,17 +80,12 @@ class Scatterer:
         if topic not in self.__message_handlers:
             raise NotImplementedError('Message handler for topic \"{}\" is not provided'.format(topic))
 
-        topic_version = 0
-        if topic in self.__topic_versions:
-            topic_version = self.__topic_versions[topic]
-
-        self.__topic_versions[topic] = topic_version + 1
         scatter_message = routing_pb2.ScatterMessage(
             data=data,
             ttl=self.__ttl_init_value,
             topic=topic,
             source_node=self.__id,
-            topic_version=topic_version,
+            timestamp=int(time.time()),
             dest_groups=[],
         )
 
@@ -105,15 +100,15 @@ class Scatterer:
     async def handle_scatter_message(self, message: routing_pb2.ScatterMessage) -> None:
         assert self.__router is not None
 
-        if message.topic in self.__last_seen_topic_versions and \
-                message.source_node in self.__last_seen_topic_versions[message.topic] and \
-                message.topic_version <= self.__last_seen_topic_versions[message.topic][message.source_node]:
+        if message.topic in self.__last_seen_topics_ts and \
+                message.source_node in self.__last_seen_topics_ts[message.topic] and \
+                message.timestamp <= self.__last_seen_topics_ts[message.topic][message.source_node]:
             return
 
         if message.topic in self.__message_handlers:
             await self.__message_handlers[message.topic].handle(message.data, message.source_node)
 
-        self.__last_seen_topic_versions[message.topic][message.source_node] = message.topic_version
+        self.__last_seen_topics_ts[message.topic][message.source_node] = message.timestamp
         next_hops: tp.Dict[int, routing_pb2.ScatterMessage] = {}
         message.ttl -= 1
         if message.ttl <= 0:
@@ -151,7 +146,7 @@ class Scatterer:
             ttl=message.ttl,
             topic=message.topic,
             source_node=message.source_node,
-            topic_version=message.topic_version,
+            timestamp=message.timestamp,
             dest_groups=[],
         )
 
