@@ -35,45 +35,51 @@ class ReducerDesignator:
     def handle_heartbeat(self, heartbeat: routing_pb2.HeartbeatMessage, source_node: int) -> None:
         self.__received_heartbeats[source_node] = heartbeat
         source_revision = NeighbourRevision(source_node, heartbeat.start_ts)
-        if heartbeat.state == OTHER:
-            if self.__is_new_revision(self.__reducer, source_revision):
-                self.__reducer = NeighbourRevision(-1, -1)
-            elif self.__is_new_revision(self.__backup_reducer, source_revision):
-                self.__backup_reducer = NeighbourRevision(-1, -1)
-        elif heartbeat.state == REDUCER:
+        if heartbeat.state == REDUCER:
             if self.__reducer.id < source_revision.id or \
                     self.__is_new_revision(self.__reducer, source_revision):
                 self.__reducer = source_revision
                 if self.__reducer.id == self.__backup_reducer.id:
                     self.__backup_reducer = NeighbourRevision(-1, -1)
         elif heartbeat.state == BACKUP_REDUCER:
+            if self.__is_same(self.__reducer, source_revision):
+                return
+
             if self.__backup_reducer.id < source_revision.id or \
                     self.__is_new_revision(self.__backup_reducer, source_revision):
                 self.__backup_reducer = source_revision
-                if self.__reducer.id == self.__backup_reducer.id:
-                    self.__reducer = NeighbourRevision(-1, -1)
+        elif heartbeat.state == OTHER:
+            if self.__is_new_revision(self.__reducer, source_revision):
+                self.__reducer = NeighbourRevision(-1, -1)
+            elif self.__is_new_revision(self.__backup_reducer, source_revision):
+                self.__backup_reducer = NeighbourRevision(-1, -1)
 
     @staticmethod
     def __is_new_revision(prev: NeighbourRevision, cur: NeighbourRevision) -> bool:
         return prev.id == cur.id and prev.start_ts < cur.start_ts
 
+    @staticmethod
+    def __is_same(node_1: NeighbourRevision, node_2: NeighbourRevision) -> bool:
+        return node_1.id == node_2.id and node_1.start_ts == node_2.start_ts
+
     async def __send_heartbeat(self) -> None:
         heartbeat = routing_pb2.HeartbeatMessage(state=OTHER, start_ts=self.__start_ts)
-        if self.__reducer.id == self.__id and self.__reducer.start_ts == self.__start_ts:
+        if self.__reducer.id == self.__id:
             heartbeat.state = REDUCER
-        elif self.__backup_reducer.id == self.__id and self.__backup_reducer.start_ts == self.__start_ts:
+        elif self.__backup_reducer.id == self.__id:
             heartbeat.state = BACKUP_REDUCER
 
         await self.__scatterer.scatter_local(heartbeat.SerializeToString(), self.HEARTBEAT_TOPIC)
 
     def __check_availability(self) -> None:
-        if not self.__is_node_alive(self.__reducer) or not self.__is_node_alive(self.__backup_reducer):
+        if not self.__is_node_alive(self.__reducer, REDUCER) or \
+                not self.__is_node_alive(self.__backup_reducer, BACKUP_REDUCER):
             self.__reelect()
 
         self.__received_heartbeats.clear()
 
     def __reelect(self) -> None:
-        if not self.__is_node_alive(self.__reducer):
+        if not self.__is_node_alive(self.__reducer, REDUCER):
             self.__reducer = self.__backup_reducer
             self.__backup_reducer = NeighbourRevision(-1, -1)
 
@@ -112,9 +118,11 @@ class ReducerDesignator:
 
         self.__reducer = self.__elect_from(possible_reducers, self_proclaimed_reducers)
 
-    def __is_node_alive(self, node: NeighbourRevision) -> bool:
-        return node.id not in self.__received_heartbeats or \
-               node.start_ts != self.__received_heartbeats[node.id].start_ts
+    def __is_node_alive(self, node: NeighbourRevision,
+                        required_state: tp.Optional[routing_pb2.NeighbourState.V] = None) -> bool:
+        return node.id in self.__received_heartbeats and \
+               node.start_ts == self.__received_heartbeats[node.id].start_ts and \
+               (required_state is None or self.__received_heartbeats[node.id].state == required_state)
 
     def __elect_from(self, possible: tp.Set[int], self_proclaimed: tp.Set[int]) -> NeighbourRevision:
         new_elect = -1
