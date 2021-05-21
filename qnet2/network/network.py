@@ -6,7 +6,7 @@ class DataHandler:
     def __init__(self) -> None:
         pass
 
-    async def handle(self, data: bytes) -> None:
+    def handle(self, data: bytes) -> None:
         pass
 
 
@@ -22,8 +22,7 @@ class UDPServer(asyncio.DatagramProtocol):
         print('Server\'s connection closed')
 
     def datagram_received(self, data: bytes, addr: tp.Tuple[str, int]) -> None:
-        loop = asyncio.get_event_loop()
-        loop.create_task(self.__handler.handle(data))
+        self.__handler.handle(data)
 
     def error_received(self, exc: Exception) -> None:
         print('Error received:', exc)

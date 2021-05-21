@@ -3,15 +3,15 @@ import time
 import typing as tp
 from google.protobuf.message import DecodeError
 
-from . import routing_pb2
+from . import network_pb2
 from .router import Router
-from .net_config import Config
+from qnet2.config.net_config import Config
 from . import network
 from .network import DataHandler, UDPServer
 
 
 class MessageHandlerStrategy:
-    async def handle(self, data: bytes, source_node: int) -> None:
+    def handle(self, data: bytes, source_node: int) -> None:
         pass
 
 
@@ -70,17 +70,17 @@ class Scatterer:
         else:
             self.__run_server_task.cancel()
 
-    async def scatter_local(self, data: bytes, topic: str) -> None:
-        await self.handle_scatter_message(self.__construct_scatter_message(data, topic, False))
+    def scatter_local(self, data: bytes, topic: str) -> None:
+        self.handle_scatter_message(self.__construct_scatter_message(data, topic, False))
 
-    async def scatter_global(self, data: bytes, topic: str) -> None:
-        await self.handle_scatter_message(self.__construct_scatter_message(data, topic, True))
+    def scatter_global(self, data: bytes, topic: str) -> None:
+        self.handle_scatter_message(self.__construct_scatter_message(data, topic, True))
 
-    def __construct_scatter_message(self, data: bytes, topic: str, is_global: bool) -> routing_pb2.ScatterMessage:
+    def __construct_scatter_message(self, data: bytes, topic: str, is_global: bool) -> network_pb2.ScatterMessage:
         if topic not in self.__message_handlers:
             raise NotImplementedError('Message handler for topic \"{}\" is not provided'.format(topic))
 
-        scatter_message = routing_pb2.ScatterMessage(
+        scatter_message = network_pb2.ScatterMessage(
             data=data,
             ttl=self.__ttl_init_value,
             topic=topic,
@@ -97,7 +97,7 @@ class Scatterer:
 
         return scatter_message
 
-    async def handle_scatter_message(self, message: routing_pb2.ScatterMessage) -> None:
+    def handle_scatter_message(self, message: network_pb2.ScatterMessage) -> None:
         assert self.__router is not None
 
         if message.topic in self.__last_seen_topics_ts and \
@@ -106,18 +106,18 @@ class Scatterer:
             return
 
         if message.topic in self.__message_handlers:
-            await self.__message_handlers[message.topic].handle(message.data, message.source_node)
+            self.__message_handlers[message.topic].handle(message.data, message.source_node)
 
         self.__last_seen_topics_ts[message.topic][message.source_node] = message.timestamp
-        next_hops: tp.Dict[int, routing_pb2.ScatterMessage] = {}
+        next_hops: tp.Dict[int, network_pb2.ScatterMessage] = {}
         message.ttl -= 1
         if message.ttl <= 0:
-            await self.__handle_expired_message(message)
+            self.__handle_expired_message(message)
             return
 
         for dest_group in message.dest_groups:
             if dest_group == self.__group_id:
-                await self.__scatter_within_group(message)
+                self.__scatter_within_group(message)
             else:
                 next_hop = self.__router.get_next_hop(dest_group)
                 assert next_hop is not None
@@ -129,19 +129,19 @@ class Scatterer:
                     next_hops[next_hop].dest_groups.append(dest_group)
 
         for next_hop, message in next_hops.items():
-            await network.send_data(
+            asyncio.create_task(network.send_data(
                 self.__config.get_ip_addr_by_node_id(next_hop),
                 self.SCATTER_SERVER_PORT,
                 message.SerializeToString()
-            )
+            ))
 
-    async def __handle_expired_message(self, message: routing_pb2.ScatterMessage) -> None:
+    def __handle_expired_message(self, message: network_pb2.ScatterMessage) -> None:
         assert message.ttl <= 0
         if self.__group_id in message.dest_groups:
-            await self.__scatter_within_group(message)
+            self.__scatter_within_group(message)
 
-    async def __scatter_within_group(self, message: routing_pb2.ScatterMessage) -> None:
-        internal_message = routing_pb2.ScatterMessage(
+    def __scatter_within_group(self, message: network_pb2.ScatterMessage) -> None:
+        internal_message = network_pb2.ScatterMessage(
             data=message.data,
             ttl=message.ttl,
             topic=message.topic,
@@ -152,11 +152,11 @@ class Scatterer:
 
         for node in self.__group:
             if self.__id != node:
-                await network.send_data(
+                asyncio.create_task(network.send_data(
                     self.__config.get_ip_addr_by_node_id(node),
                     self.SCATTER_SERVER_PORT,
                     internal_message.SerializeToString()
-                )
+                ))
 
 
 class ScatterHandler(DataHandler):
@@ -164,10 +164,10 @@ class ScatterHandler(DataHandler):
         super().__init__()
         self.__scatterer = scatterer
 
-    async def handle(self, data: bytes) -> None:
-        scatter_message = routing_pb2.ScatterMessage()
+    def handle(self, data: bytes) -> None:
+        scatter_message = network_pb2.ScatterMessage()
         try:
             scatter_message.ParseFromString(data)
-            await self.__scatterer.handle_scatter_message(scatter_message)
+            self.__scatterer.handle_scatter_message(scatter_message)
         except DecodeError:
             print('Can\'t parse ScatterMessage from data:', data)

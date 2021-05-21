@@ -1,13 +1,12 @@
-import asyncio
 from functools import partial
 import typing as tp
 from google.protobuf.message import DecodeError
 
-from . import routing_pb2
-from .timer import RandomShiftedRepeater, Repeater
+from . import network_pb2
+from qnet2.utils.timer import RandomShiftedRepeaterSyncCallback, RepeaterSyncCallback
 from .metrics import MetricService
 from .scatter import Scatterer, MessageHandlerStrategy
-from .net_config import Config
+from qnet2.config.net_config import Config
 
 
 class Router:
@@ -25,21 +24,24 @@ class Router:
         self.__metric_service = metric_service
         self.__scatterer = scatterer
 
-        self.__route_table = routing_pb2.RouteTable()
-        self.__route_table.routes[self.__group] = routing_pb2.Route(next_hop=self.__id, metric=0, length=0)
+        self.__route_table = network_pb2.RouteTable()
+        self.__route_table.routes[self.__group] = network_pb2.Route(next_hop=self.__id, metric=0, length=0)
         for group_id in self.__groups:
             self.__set_naive_route(group_id)
 
         self.__scatterer.set_router(self)
         self.__scatterer.set_handler_strategy(self.ROUTE_UPDATES_TOPIC, RouterHandler(self))
 
-        self.__scatter_rt_timer = RandomShiftedRepeater(
+        self.__scatter_rt_timer = RandomShiftedRepeaterSyncCallback(
             self.__SCATTER_RT_TIMEOUT,
             -self.__MAX_TIMER_SHIFT,
             self.__MAX_TIMER_SHIFT,
             partial(self.__scatter_updates, self.__route_table.routes)
         )
-        self.__availability_checker = Repeater(self.__KEEPALIVE_TIMEOUT, self.__availability_checker_callback)
+        self.__availability_checker = RepeaterSyncCallback(
+            self.__KEEPALIVE_TIMEOUT,
+            self.__availability_checker_callback
+        )
 
     def __set_naive_route(self, target_group_id: int) -> None:
         if target_group_id == self.__group:
@@ -50,26 +52,26 @@ class Router:
             direct_metric = self.__metric_service.get_direct_metric(node)
             if best_direct_metric is None or best_direct_metric > direct_metric:
                 best_direct_metric = direct_metric
-                self.__route_table.routes[target_group_id] = routing_pb2.Route(
+                self.__route_table.routes[target_group_id] = network_pb2.Route(
                     next_hop=node, metric=direct_metric, length=1
                 )
 
-    async def __scatter_updates(self, updated_routes: tp.Dict[int, routing_pb2.Route]) -> None:
-        update_message = routing_pb2.RouteTable(
+    def __scatter_updates(self, updated_routes: tp.Dict[int, network_pb2.Route]) -> None:
+        update_message = network_pb2.RouteTable(
             routes=updated_routes,
         )
-        await self.__scatterer.scatter_global(update_message.SerializeToString(), self.ROUTE_UPDATES_TOPIC)
+        self.__scatterer.scatter_global(update_message.SerializeToString(), self.ROUTE_UPDATES_TOPIC)
 
-    async def __availability_checker_callback(self) -> None:
-        reset_routes: tp.Dict[int, routing_pb2.Route] = {}
+    def __availability_checker_callback(self) -> None:
+        reset_routes: tp.Dict[int, network_pb2.Route] = {}
         for group, route in self.__route_table.routes.items():
             if not self.__metric_service.is_node_available(route.next_hop):
                 self.__set_naive_route(group)
                 reset_routes[group] = self.__route_table.routes[group]
 
-        await self.__scatter_updates(reset_routes)
+        self.__scatter_updates(reset_routes)
 
-    def get_route(self, target_group: int) -> routing_pb2.Route:
+    def get_route(self, target_group: int) -> network_pb2.Route:
         return self.__route_table.routes[target_group]
 
     def get_next_hop(self, target_group: int) -> tp.Optional[int]:
@@ -78,16 +80,16 @@ class Router:
         else:
             return self.__route_table.routes[target_group].next_hop
 
-    async def handle_update(self, updated_routes: routing_pb2.RouteTable, source_node: int) -> None:
-        emergency_updates: tp.Dict[int, routing_pb2.Route] = {}
+    def handle_update(self, updated_routes: network_pb2.RouteTable, source_node: int) -> None:
+        emergency_updates: tp.Dict[int, network_pb2.Route] = {}
         for group, route in updated_routes.routes.items():
             self.__update_route(group, source_node, route, emergency_updates)
 
-        await self.__scatter_updates(emergency_updates)
+        self.__scatter_updates(emergency_updates)
 
     def __update_route(self, target_group: int, proposed_next_hop: int,
-                       proposed_route: routing_pb2.Route,
-                       emergency_updates: tp.Dict[int, routing_pb2.Route]) -> None:
+                       proposed_route: network_pb2.Route,
+                       emergency_updates: tp.Dict[int, network_pb2.Route]) -> None:
         current_route = self.__route_table.routes[target_group]
         proposed_metric = proposed_route.metric + self.__metric_service.get_direct_metric(proposed_next_hop)
         proposed_length = proposed_route.length + 1
@@ -113,10 +115,10 @@ class RouterHandler(MessageHandlerStrategy):
         super().__init__()
         self.__router = router
 
-    async def handle(self, data: bytes, source_node: int) -> None:
-        update_message = routing_pb2.RouteTable()
+    def handle(self, data: bytes, source_node: int) -> None:
+        update_message = network_pb2.RouteTable()
         try:
             update_message.ParseFromString(data)
-            await self.__router.handle_update(update_message, source_node)
+            self.__router.handle_update(update_message, source_node)
         except DecodeError:
             print('Can\'t parse UpdateMessage from data:', data)

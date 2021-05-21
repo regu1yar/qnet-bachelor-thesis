@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package routing;
+package network;
 
 message Route {
   int64 next_hop = 1;
@@ -10,17 +10,6 @@ message Route {
 
 message RouteTable {
   map<uint64, Route> routes = 1;
-}
-
-enum NeighbourState {
-  OTHER = 0;
-  REDUCER = 1;
-  BACKUP_REDUCER = 2;
-}
-
-message HeartbeatMessage {
-  NeighbourState state = 1;
-  uint64 start_ts = 2;
 }
 
 message ScatterMessage {
