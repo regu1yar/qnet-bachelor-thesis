@@ -12,7 +12,7 @@ from .designator import ReducerDesignator
 
 
 class ReducerContext:
-    SEND_GROUP_RESULT_TIMEOUT = 5
+    SCATTER_GROUP_RESULT_TIMEOUT = 5
 
     def __init__(self, config: Config, scatterer: ReductionScatterer, local_sender: LocalValueSender,
                  reduction_strategy: ReductionStrategy, init_state: State):
@@ -31,7 +31,7 @@ class ReducerContext:
         self.__cur_reduction_set.setall(0)
 
         self.transition_to(init_state)
-        self.__send_repeater = RepeaterSyncCallback(self.SEND_GROUP_RESULT_TIMEOUT, self.handle_send_timeout)
+        self.__scatter_repeater = RepeaterSyncCallback(self.SCATTER_GROUP_RESULT_TIMEOUT, self.handle_scatter_timeout)
 
     @staticmethod
     def __calc_max_node_id(config: Config) -> int:
@@ -53,9 +53,9 @@ class ReducerContext:
         if self.__state is not None:
             self.__state.handle_state_transition(to_state)
 
-    def handle_send_timeout(self) -> None:
+    def handle_scatter_timeout(self) -> None:
         if self.__state is not None:
-            self.__state.handle_send_timeout()
+            self.__state.handle_scatter_timeout()
 
     def reduce_with(self, message: ReductionResult) -> None:
         message_reduction_set = bitarray()
@@ -103,7 +103,7 @@ class State:
     def handle_state_transition(self, to_state: NeighbourState.V) -> None:
         pass
 
-    def handle_send_timeout(self) -> None:
+    def handle_scatter_timeout(self) -> None:
         pass
 
 
@@ -127,7 +127,7 @@ class ReducerState(State):
                 'Unexpected NeighbourState: {}'.format(reduction_pb2.NeighbourState.Name(to_state))
             )
 
-    def handle_send_timeout(self) -> None:
+    def handle_scatter_timeout(self) -> None:
         if self.context is not None:
             self.context.scatter_reduction_result()
             self.context.clear_reduction_result()
@@ -153,7 +153,7 @@ class PreBackupState(State):
                 'Unexpected NeighbourState: {}'.format(reduction_pb2.NeighbourState.Name(to_state))
             )
 
-    def handle_send_timeout(self) -> None:
+    def handle_scatter_timeout(self) -> None:
         if self.context is not None:
             self.context.scatter_reduction_result()
             self.context.clear_reduction_result()
@@ -180,7 +180,7 @@ class TempReducerState(State):
                 'Unexpected NeighbourState: {}'.format(reduction_pb2.NeighbourState.Name(to_state))
             )
 
-    def handle_send_timeout(self) -> None:
+    def handle_scatter_timeout(self) -> None:
         if self.context is not None:
             self.context.scatter_reduction_result()
             self.context.clear_reduction_result()
@@ -208,7 +208,7 @@ class BackupState(State):
                 'Unexpected NeighbourState: {}'.format(reduction_pb2.NeighbourState.Name(to_state))
             )
 
-    def handle_send_timeout(self) -> None:
+    def handle_scatter_timeout(self) -> None:
         if self.context is not None:
             self.context.clear_reduction_result()
 
