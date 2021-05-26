@@ -3,11 +3,11 @@ import typing as tp
 
 from google.protobuf.message import DecodeError
 
-from . import all_reduce_pb2
+from . import reduction_pb2
 from qnet2.config.net_config import Config
 from qnet2.utils.timer import RepeaterSyncCallback
 from qnet2.network.scatter import Scatterer, MessageHandlerStrategy
-from .all_reduce_pb2 import OTHER, REDUCER, BACKUP_REDUCER
+from .reduction_pb2 import OTHER, REDUCER, BACKUP_REDUCER
 
 
 class NeighbourRevision:
@@ -31,12 +31,12 @@ class ReducerDesignator:
         self.__backup_reducer = NeighbourRevision(-1, -1)
         self.__reducer_till_expiration = -1
         self.__backup_till_expiration = -1
-        self.__received_heartbeats: tp.Dict[int, all_reduce_pb2.HeartbeatMessage] = {}
+        self.__received_heartbeats: tp.Dict[int, reduction_pb2.HeartbeatMessage] = {}
 
         self.__heartbeat_timer = RepeaterSyncCallback(self.__SEND_HEARTBEAT_TIMEOUT, self.__send_heartbeat, True)
         self.__availability_checker = RepeaterSyncCallback(self.__DEAD_TIMEOUT, self.__check_availability, False)
 
-    def handle_heartbeat(self, heartbeat: all_reduce_pb2.HeartbeatMessage, source_node: int) -> None:
+    def handle_heartbeat(self, heartbeat: reduction_pb2.HeartbeatMessage, source_node: int) -> None:
         self.__received_heartbeats[source_node] = heartbeat
         source_revision = NeighbourRevision(source_node, heartbeat.start_ts)
         if heartbeat.state == REDUCER:
@@ -61,6 +61,12 @@ class ReducerDesignator:
             elif self.__is_new_revision(self.__backup_reducer, source_revision):
                 self.__set_backup(NeighbourRevision(-1, -1))
 
+    def get_reducer(self) -> int:
+        return self.__reducer.id
+
+    def get_backup(self) -> int:
+        return self.__backup_reducer.id
+
     @staticmethod
     def __is_new_revision(prev: NeighbourRevision, cur: NeighbourRevision) -> bool:
         return prev.id == cur.id and prev.start_ts < cur.start_ts
@@ -70,7 +76,7 @@ class ReducerDesignator:
         return node_1.id == node_2.id and node_1.start_ts == node_2.start_ts
 
     def __send_heartbeat(self) -> None:
-        heartbeat = all_reduce_pb2.HeartbeatMessage(state=OTHER, start_ts=self.__start_ts)
+        heartbeat = reduction_pb2.HeartbeatMessage(state=OTHER, start_ts=self.__start_ts)
         if self.__reducer.id == self.__id:
             heartbeat.state = REDUCER
         elif self.__backup_reducer.id == self.__id:
@@ -95,7 +101,7 @@ class ReducerDesignator:
         return node.id in self.__received_heartbeats and \
                node.start_ts == self.__received_heartbeats[node.id].start_ts
 
-    def __is_in_state(self, node_id: int, required_state: all_reduce_pb2.NeighbourState.V) -> bool:
+    def __is_in_state(self, node_id: int, required_state: reduction_pb2.NeighbourState.V) -> bool:
         if node_id not in self.__received_heartbeats:
             return False
         return self.__received_heartbeats[node_id].state == required_state
@@ -176,7 +182,7 @@ class DesignateHandler(MessageHandlerStrategy):
         self.__designator = designator
 
     def handle(self, data: bytes, source_node: int) -> None:
-        heartbeat_message = all_reduce_pb2.HeartbeatMessage()
+        heartbeat_message = reduction_pb2.HeartbeatMessage()
         try:
             heartbeat_message.ParseFromString(data)
             self.__designator.handle_heartbeat(heartbeat_message, source_node)

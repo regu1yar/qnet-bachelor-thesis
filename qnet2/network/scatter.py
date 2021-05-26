@@ -71,12 +71,19 @@ class Scatterer:
             self.__run_server_task.cancel()
 
     def scatter_local(self, data: bytes, topic: str) -> None:
-        self.handle_scatter_message(self.__construct_scatter_message(data, topic, False))
+        self.handle_scatter_message(self.__construct_scatter_message(data, topic, 'global'))
 
     def scatter_global(self, data: bytes, topic: str) -> None:
-        self.handle_scatter_message(self.__construct_scatter_message(data, topic, True))
+        self.handle_scatter_message(self.__construct_scatter_message(data, topic, 'local'))
 
-    def __construct_scatter_message(self, data: bytes, topic: str, is_global: bool) -> network_pb2.ScatterMessage:
+    def send_directly(self, data: bytes, topic: str, dest_node: int) -> None:
+        asyncio.create_task(network.send_data(
+            self.__config.get_ip_addr_by_node_id(dest_node),
+            self.SCATTER_SERVER_PORT,
+            self.__construct_scatter_message(data, topic, 'direct').SerializeToString()
+        ))
+
+    def __construct_scatter_message(self, data: bytes, topic: str, scatter_type: str) -> network_pb2.ScatterMessage:
         if topic not in self.__message_handlers:
             raise NotImplementedError('Message handler for topic \"{}\" is not provided'.format(topic))
 
@@ -89,11 +96,15 @@ class Scatterer:
             dest_groups=[],
         )
 
-        if is_global:
+        if scatter_type == 'global':
             for group in self.__groups:
                 scatter_message.dest_groups.append(group)
-        else:
+        elif scatter_type == 'local':
             scatter_message.dest_groups.append(self.__group_id)
+        elif scatter_type == 'direct':
+            pass
+        else:
+            raise NotImplementedError('Unexpected scatter type: {}'.format(scatter_type))
 
         return scatter_message
 

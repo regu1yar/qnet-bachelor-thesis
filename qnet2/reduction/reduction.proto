@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package reduction;
+
+enum NeighbourState {
+  OTHER = 0;
+  REDUCER = 1;
+  BACKUP_REDUCER = 2;
+}
+
+message HeartbeatMessage {
+  NeighbourState state = 1;
+  uint64 start_ts = 2;
+}
+
+message ReductionValue {
+  oneof value {
+    bool bool_value = 1;
+    int64 int_value = 2;
+    double double_value = 3;
+    string string_value = 5;
+    bytes bytes_value = 6;
+  }
+}
+
+message HashMapReductionValues {
+  map<int64, ReductionValue> values = 1;
+}
+
+message ArrayReductionValues {
+  repeated ReductionValue values = 1;
+}
+
+message ReductionValues {
+  oneof values {
+    HashMapReductionValues hash_map_values = 1;
+    ArrayReductionValues array_values = 2;
+  }
+}
+
+message ReductionResult {
+  bytes reduction_set_mask = 1;
+  ReductionValues values = 2;
+}
