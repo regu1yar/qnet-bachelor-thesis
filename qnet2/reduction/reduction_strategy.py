@@ -1,13 +1,9 @@
-import typing as tp
-
-from .reduction_pb2 import HashMapReductionValues, ArrayReductionValues
+from .reduction_pb2 import ReductionValues
 
 
 class ReductionStrategy:
-    def reduce(self, v1: tp.Union[HashMapReductionValues, ArrayReductionValues],
-               v2: tp.Union[HashMapReductionValues, ArrayReductionValues]) -> \
-            tp.Union[HashMapReductionValues, ArrayReductionValues]:
+    def reduce(self, v1: ReductionValues, v2: ReductionValues) -> ReductionValues:
         pass
 
-    def generate_neutral(self) -> tp.Union[HashMapReductionValues, ArrayReductionValues]:
+    def generate_neutral(self) -> ReductionValues:
         pass

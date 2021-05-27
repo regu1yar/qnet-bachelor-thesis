@@ -8,6 +8,7 @@ from qnet2.config.net_config import Config
 from qnet2.utils.timer import RepeaterSyncCallback
 from qnet2.network.scatter import Scatterer, MessageHandlerStrategy
 from .reduction_pb2 import OTHER, REDUCER, BACKUP_REDUCER
+from .state_machine import ReducerContext
 
 
 class NeighbourRevision:
@@ -17,16 +18,20 @@ class NeighbourRevision:
 
 
 class ReducerDesignator:
-    __SEND_HEARTBEAT_TIMEOUT = 10
+    __SEND_HEARTBEAT_TIMEOUT = 2
     __DEAD_TIMEOUT = __SEND_HEARTBEAT_TIMEOUT * 3
     __STATE_EXPIRATION = 1
 
     HEARTBEAT_TOPIC = 'heartbeat'
 
-    def __init__(self, config: Config, scatterer: Scatterer):
+    def __init__(self, config: Config, scatterer: Scatterer, context: ReducerContext):
         self.__id = config.get_local_group_id()
         self.__start_ts = int(time.time())
         self.__scatterer = scatterer
+        self.__context = context
+        self.__context.designator = self
+        self.__context.handle_state_transition(OTHER)
+
         self.__reducer = NeighbourRevision(-1, -1)
         self.__backup_reducer = NeighbourRevision(-1, -1)
         self.__reducer_till_expiration = -1
@@ -76,13 +81,16 @@ class ReducerDesignator:
         return node_1.id == node_2.id and node_1.start_ts == node_2.start_ts
 
     def __send_heartbeat(self) -> None:
-        heartbeat = reduction_pb2.HeartbeatMessage(state=OTHER, start_ts=self.__start_ts)
-        if self.__reducer.id == self.__id:
-            heartbeat.state = REDUCER
-        elif self.__backup_reducer.id == self.__id:
-            heartbeat.state = BACKUP_REDUCER
-
+        heartbeat = reduction_pb2.HeartbeatMessage(state=self.__get_state(), start_ts=self.__start_ts)
         self.__scatterer.scatter_local(heartbeat.SerializeToString(), self.HEARTBEAT_TOPIC)
+
+    def __get_state(self) -> reduction_pb2.NeighbourState.V:
+        if self.__reducer.id == self.__id:
+            return REDUCER
+        elif self.__backup_reducer.id == self.__id:
+            return BACKUP_REDUCER
+        else:
+            return OTHER
 
     def __check_availability(self) -> None:
         if not self.__is_node_alive(self.__reducer) or not self.__is_node_alive(self.__backup_reducer):
@@ -153,12 +161,16 @@ class ReducerDesignator:
         else:
             self.__reducer_till_expiration = -1
 
+        self.__context.handle_state_transition(self.__get_state())
+
     def __set_backup(self, node: NeighbourRevision) -> None:
         self.__backup_reducer = node
         if node.id >= 0:
             self.__backup_till_expiration = self.__STATE_EXPIRATION
         else:
             self.__backup_till_expiration = -1
+
+        self.__context.handle_state_transition(self.__get_state())
 
     def __elect_from(self, possible: tp.Set[int], self_proclaimed: tp.Set[int]) -> NeighbourRevision:
         new_elect = -1

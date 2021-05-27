@@ -42,3 +42,9 @@ message ReductionResult {
   bytes reduction_set_mask = 1;
   ReductionValues values = 2;
 }
+
+message IndividualValues {
+  int64 node_id = 1;
+  ReductionValues values = 2;
+  int64 ttl = 3;
+}

@@ -1,53 +1,49 @@
+import asyncio
 from bitarray import bitarray
 import typing as tp
 
 import reduction_pb2
-from .reduction_pb2 import ReductionResult, NeighbourState, HashMapReductionValues, ArrayReductionValues, REDUCER, \
-    BACKUP_REDUCER, OTHER
-from .reduction_strategy import ReductionStrategy
+from .reduction_pb2 import ReductionResult, NeighbourState, IndividualValues, REDUCER, BACKUP_REDUCER, OTHER
 from qnet2.config.net_config import Config
 from qnet2.utils.timer import RepeaterSyncCallback
-from .communication import ReductionScatterer, LocalValueSender
+from .communication import ReductionScatterer, IndividualValueSender, IndividualValuesHandler
 from .designator import ReducerDesignator
+from qnet2.network.network import UDPServer
+from reduction import Reducer
 
 
 class ReducerContext:
-    SCATTER_GROUP_RESULT_TIMEOUT = 5
+    __SCATTER_GROUP_RESULT_TIMEOUT = 10
+    SERVER_PORT = 4202
 
-    def __init__(self, config: Config, scatterer: ReductionScatterer, local_sender: LocalValueSender,
-                 reduction_strategy: ReductionStrategy, init_state: State):
-        self.__id = config.get_local_node_id()
-        self.__max_node_id = self.__calc_max_node_id(config)
+    def __init__(self, reducer: Reducer, scatterer: ReductionScatterer,
+                 local_sender: IndividualValueSender, init_state: State):
+        self.reducer = reducer
         self.__scatterer = scatterer
         self.local_sender = local_sender
-        self.__reduction_strategy = reduction_strategy
         self.designator: tp.Optional[ReducerDesignator] = None
 
         self.__state: tp.Optional[State] = None
 
-        self.__cur_reduction_result: tp.Union[HashMapReductionValues, ArrayReductionValues] = \
-            self.__reduction_strategy.generate_neutral()
-        self.__cur_reduction_set = bitarray(self.__max_node_id)
-        self.__cur_reduction_set.setall(0)
-
         self.transition_to(init_state)
-        self.__scatter_repeater = RepeaterSyncCallback(self.SCATTER_GROUP_RESULT_TIMEOUT, self.handle_scatter_timeout)
+        self.__scatter_repeater = RepeaterSyncCallback(self.__SCATTER_GROUP_RESULT_TIMEOUT, self.handle_scatter_timeout)
 
-    @staticmethod
-    def __calc_max_node_id(config: Config) -> int:
-        max_node_id = 0
-        for group in config.get_groups_to_nodes_dict().values():
-            max_node_id = max(max_node_id, max(group))
+        self.__transport: tp.Optional[asyncio.BaseTransport] = None
+        self.__run_server_task = asyncio.create_task(self.__run_server())
 
-        return max_node_id
+    async def __run_server(self) -> None:
+        loop = asyncio.get_event_loop()
+        self.__transport, _ = await loop.create_datagram_endpoint(
+            lambda: UDPServer(IndividualValuesHandler(self)),
+            local_addr=('0.0.0.0', self.SERVER_PORT))
 
     def transition_to(self, new_state: State) -> None:
         self.__state = new_state
         self.__state.context = self
 
-    def handle_reduction_message(self, message: ReductionResult) -> None:
+    def handle_individual_values(self, individual_values: IndividualValues) -> None:
         if self.__state is not None:
-            self.__state.handle_reduction_message(message)
+            self.__state.handle_individual_values(individual_values)
 
     def handle_state_transition(self, to_state: NeighbourState.V) -> None:
         if self.__state is not None:
@@ -57,47 +53,15 @@ class ReducerContext:
         if self.__state is not None:
             self.__state.handle_scatter_timeout()
 
-    def reduce_with(self, message: ReductionResult) -> None:
-        message_reduction_set = bitarray()
-        message_reduction_set.frombytes(message.reduction_set_mask)
-        if not (self.__cur_reduction_set & message_reduction_set).any():
-            self.__cur_reduction_set |= message_reduction_set
-            if message.values.HasField('hash_map_values'):
-                self.__cur_reduction_result = self.__reduction_strategy.reduce(
-                    self.__cur_reduction_result,
-                    message.values.hash_map_values
-                )
-            elif message.values.HasField('array_values'):
-                self.__cur_reduction_result = self.__reduction_strategy.reduce(
-                    self.__cur_reduction_result,
-                    message.values.array_values
-                )
-            else:
-                self.__cur_reduction_set ^= message_reduction_set
-
-    def clear_reduction_result(self) -> None:
-        self.__cur_reduction_set = bitarray(self.__max_node_id)
-        self.__cur_reduction_set.setall(0)
-        self.__cur_reduction_result = self.__reduction_strategy.generate_neutral()
-
     def scatter_reduction_result(self) -> None:
-        reduction_values = reduction_pb2.ReductionValues()
-        if isinstance(self.__cur_reduction_result, HashMapReductionValues):
-            reduction_values.hash_map_values.CopyFrom(self.__cur_reduction_result)
-        elif isinstance(self.__cur_reduction_result, ArrayReductionValues):
-            reduction_values.array_values.CopyFrom(self.__cur_reduction_result)
-
-        self.__scatterer.scatter_group_result(ReductionResult(
-            reduction_set_mask=self.__cur_reduction_set.tobytes(),
-            values=reduction_values,
-        ))
+        self.__scatterer.scatter_group_result(self.reducer.get_reduction_result())
 
 
 class State:
     def __init__(self) -> None:
         self.context: tp.Optional[ReducerContext] = None
 
-    def handle_reduction_message(self, message: ReductionResult) -> None:
+    def handle_individual_values(self, individual_values: IndividualValues) -> None:
         pass
 
     def handle_state_transition(self, to_state: NeighbourState.V) -> None:
@@ -111,9 +75,9 @@ class ReducerState(State):
     def __init__(self) -> None:
         super().__init__()
 
-    def handle_reduction_message(self, message: ReductionResult) -> None:
+    def handle_individual_values(self, individual_values: IndividualValues) -> None:
         if self.context is not None:
-            self.context.reduce_with(message)
+            self.context.reducer.add_individual_values(individual_values)
 
     def handle_state_transition(self, to_state: NeighbourState.V) -> None:
         if to_state == REDUCER or self.context is None:
@@ -130,16 +94,16 @@ class ReducerState(State):
     def handle_scatter_timeout(self) -> None:
         if self.context is not None:
             self.context.scatter_reduction_result()
-            self.context.clear_reduction_result()
+            self.context.reducer.clear_reduction_result()
 
 
 class PreBackupState(State):
     def __init__(self) -> None:
         super().__init__()
 
-    def handle_reduction_message(self, message: ReductionResult) -> None:
+    def handle_individual_values(self, individual_values: IndividualValues) -> None:
         if self.context is not None:
-            self.context.reduce_with(message)
+            self.context.reducer.add_individual_values(individual_values)
 
     def handle_state_transition(self, to_state: NeighbourState.V) -> None:
         if to_state == BACKUP_REDUCER or self.context is None:
@@ -156,7 +120,7 @@ class PreBackupState(State):
     def handle_scatter_timeout(self) -> None:
         if self.context is not None:
             self.context.scatter_reduction_result()
-            self.context.clear_reduction_result()
+            self.context.reducer.clear_reduction_result()
             self.context.transition_to(BackupState())
 
 
@@ -164,9 +128,9 @@ class TempReducerState(State):
     def __init__(self) -> None:
         super().__init__()
 
-    def handle_reduction_message(self, message: ReductionResult) -> None:
+    def handle_individual_values(self, individual_values: IndividualValues) -> None:
         if self.context is not None:
-            self.context.reduce_with(message)
+            self.context.reducer.add_individual_values(individual_values)
 
     def handle_state_transition(self, to_state: NeighbourState.V) -> None:
         if to_state == OTHER or self.context is None:
@@ -183,7 +147,7 @@ class TempReducerState(State):
     def handle_scatter_timeout(self) -> None:
         if self.context is not None:
             self.context.scatter_reduction_result()
-            self.context.clear_reduction_result()
+            self.context.reducer.clear_reduction_result()
             self.context.transition_to(OtherState())
 
 
@@ -191,9 +155,9 @@ class BackupState(State):
     def __init__(self) -> None:
         super().__init__()
 
-    def handle_reduction_message(self, message: ReductionResult) -> None:
+    def handle_individual_values(self, individual_values: IndividualValues) -> None:
         if self.context is not None:
-            self.context.reduce_with(message)
+            self.context.reducer.add_individual_values(individual_values)
 
     def handle_state_transition(self, to_state: NeighbourState.V) -> None:
         if to_state == BACKUP_REDUCER or self.context is None:
@@ -201,7 +165,7 @@ class BackupState(State):
         elif to_state == REDUCER:
             self.context.transition_to(ReducerState())
         elif to_state == OTHER:
-            self.context.clear_reduction_result()
+            self.context.reducer.clear_reduction_result()
             self.context.transition_to(OtherState())
         else:
             raise NotImplementedError(
@@ -210,21 +174,22 @@ class BackupState(State):
 
     def handle_scatter_timeout(self) -> None:
         if self.context is not None:
-            self.context.clear_reduction_result()
+            self.context.reducer.clear_reduction_result()
 
 
 class OtherState(State):
     def __init__(self) -> None:
         super().__init__()
 
-    def handle_reduction_message(self, message: ReductionResult) -> None:
+    def handle_individual_values(self, individual_values: IndividualValues) -> None:
         if self.context is None:
             return
-        if self.context.designator is None or self.context.designator.get_reducer() < 0:
+        if self.context.designator is None or self.context.designator.get_reducer() < 0 or individual_values.ttl <= 0:
             self.context.transition_to(TempReducerState())
-            self.context.handle_reduction_message(message)
+            self.context.handle_individual_values(individual_values)
         else:
-            self.context.local_sender.send_local_result(message, self.context.designator.get_reducer())
+            individual_values.ttl -= 1
+            self.context.local_sender.send_individual_values(individual_values, self.context.designator.get_reducer())
 
     def handle_state_transition(self, to_state: NeighbourState.V) -> None:
         if to_state == OTHER or self.context is None:
