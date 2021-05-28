@@ -27,7 +27,10 @@ class ReducerDesignator:
     def __init__(self, config: Config, scatterer: Scatterer, context: ReducerContext):
         self.__id = config.get_local_group_id()
         self.__start_ts = int(time.time())
+
         self.__scatterer = scatterer
+        self.__scatterer.set_handler_strategy(self.HEARTBEAT_TOPIC, DesignateHandler(self))
+
         self.__context = context
         self.__context.designator = self
         self.__context.handle_state_transition(OTHER)
