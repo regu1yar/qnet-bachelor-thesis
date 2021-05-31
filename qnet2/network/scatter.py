@@ -116,8 +116,8 @@ class Scatterer:
                 message.timestamp <= self.__last_seen_topics_ts[message.topic][message.source_node]:
             return
 
-        if message.topic in self.__message_handlers:
-            self.__message_handlers[message.topic].handle(message.data, message.source_node)
+        if message.topic not in self.__last_seen_topics_ts:
+            self.__last_seen_topics_ts[message.topic] = {}
 
         self.__last_seen_topics_ts[message.topic][message.source_node] = message.timestamp
         next_hops: tp.Dict[int, network_pb2.ScatterMessage] = {}
@@ -131,7 +131,8 @@ class Scatterer:
                 self.__scatter_within_group(message)
             else:
                 next_hop = self.__router.get_next_hop(dest_group)
-                assert next_hop is not None
+                if next_hop is None:
+                    continue
                 if next_hop in next_hops:
                     next_hops[next_hop].dest_groups.append(dest_group)
                 else:
@@ -145,6 +146,9 @@ class Scatterer:
                 self.SCATTER_SERVER_PORT,
                 message.SerializeToString()
             ))
+
+        if message.topic in self.__message_handlers:
+            self.__message_handlers[message.topic].handle(message.data, message.source_node)
 
     def __handle_expired_message(self, message: network_pb2.ScatterMessage) -> None:
         assert message.ttl <= 0

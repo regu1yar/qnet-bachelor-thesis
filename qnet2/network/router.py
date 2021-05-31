@@ -43,18 +43,19 @@ class Router:
             self.__availability_checker_callback
         )
 
-    def __set_naive_route(self, target_group_id: int) -> None:
+    def __set_naive_route(self, target_group_id: int) -> bool:
         if target_group_id == self.__group:
-            return
-
+            return False
         best_direct_metric: tp.Optional[float] = None
         for node in self.__groups[target_group_id]:
-            direct_metric = self.__metric_service.get_direct_metric(node)
-            if best_direct_metric is None or best_direct_metric > direct_metric:
-                best_direct_metric = direct_metric
-                self.__route_table.routes[target_group_id] = network_pb2.Route(
-                    next_hop=node, metric=direct_metric, length=1
-                )
+            if self.__metric_service.is_node_available(node):
+                direct_metric = self.__metric_service.get_direct_metric(node)
+                if best_direct_metric is None or best_direct_metric > direct_metric:
+                    best_direct_metric = direct_metric
+                    self.__route_table.routes[target_group_id] = network_pb2.Route(
+                        next_hop=node, metric=direct_metric, length=1
+                    )
+        return best_direct_metric is not None
 
     def __scatter_updates(self, updated_routes: tp.Dict[int, network_pb2.Route]) -> None:
         update_message = network_pb2.RouteTable(
@@ -64,18 +65,22 @@ class Router:
 
     def __availability_checker_callback(self) -> None:
         reset_routes: tp.Dict[int, network_pb2.Route] = {}
-        for group, route in self.__route_table.routes.items():
-            if not self.__metric_service.is_node_available(route.next_hop):
-                self.__set_naive_route(group)
-                reset_routes[group] = self.__route_table.routes[group]
+        for group in self.__groups:
+            if group not in self.__route_table.routes or \
+                    not self.__metric_service.is_node_available(self.__route_table.routes[group].next_hop):
+                if self.__set_naive_route(group):
+                    reset_routes[group] = self.__route_table.routes[group]
 
         self.__scatter_updates(reset_routes)
 
-    def get_route(self, target_group: int) -> network_pb2.Route:
-        return self.__route_table.routes[target_group]
+    def get_route(self, target_group: int) -> tp.Optional[network_pb2.Route]:
+        if target_group in self.__route_table.routes:
+            return self.__route_table.routes[target_group]
+        else:
+            return None
 
     def get_next_hop(self, target_group: int) -> tp.Optional[int]:
-        if self.__group == target_group:
+        if self.__group == target_group or target_group not in self.__route_table.routes:
             return None
         else:
             return self.__route_table.routes[target_group].next_hop
@@ -90,9 +95,18 @@ class Router:
     def __update_route(self, target_group: int, proposed_next_hop: int,
                        proposed_route: network_pb2.Route,
                        emergency_updates: tp.Dict[int, network_pb2.Route]) -> None:
-        current_route = self.__route_table.routes[target_group]
         proposed_metric = proposed_route.metric + self.__metric_service.get_direct_metric(proposed_next_hop)
         proposed_length = proposed_route.length + 1
+        if target_group not in self.__route_table.routes:
+            self.__route_table.routes[target_group] = network_pb2.Route(
+                next_hop=proposed_next_hop,
+                metric=proposed_metric,
+                length=proposed_length,
+            )
+            emergency_updates[target_group] = self.__route_table.routes[target_group]
+            return
+
+        current_route = self.__route_table.routes[target_group]
         old_metric = current_route.metric
         if proposed_metric < current_route.metric or \
                 (proposed_metric == current_route.metric and proposed_length < current_route.length):
