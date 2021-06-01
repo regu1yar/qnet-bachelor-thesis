@@ -1,4 +1,5 @@
 from bitarray import bitarray
+from bitarray.util import serialize, deserialize
 import typing as tp
 
 from .reduction_pb2 import ReductionResult, IndividualValues, ReductionValues, GroupReductionResult
@@ -18,7 +19,7 @@ class Reducer:
         self.__min_node_id, self.__max_node_id = self.__calc_min_max_node_id(config)
         self.__total_nodes = self.__max_node_id - self.__min_node_id + 1
         self.__reduction_strategy = reduction_strategy
-        self.__cur_reduction_result = self.__reduction_strategy.generate_neutral()
+        self.__cur_reduction_values = self.__reduction_strategy.generate_neutral()
         self.__cur_reduction_set = bitarray(self.__total_nodes)
         self.__cur_reduction_set.setall(0)
         self.__total_overlay = 0
@@ -43,14 +44,13 @@ class Reducer:
         if self.__cur_reduction_set[individual_values.node_id - self.__min_node_id] != 1:
             self.__cur_reduction_set[individual_values.node_id - self.__min_node_id] = 1
             self.__total_reduced += 1
-            self.__cur_reduction_result = self.__reduction_strategy.reduce(
-                self.__cur_reduction_result,
+            self.__cur_reduction_values = self.__reduction_strategy.reduce(
+                self.__cur_reduction_values,
                 individual_values.values
             )
 
     def reduce_with(self, other: ReductionResult) -> None:
-        other_reduction_set = bitarray()
-        other_reduction_set.frombytes(other.reduction_set_mask)
+        other_reduction_set = deserialize(other.reduction_set_mask)
         other_reduction_set_size = other_reduction_set.count(1)
         overlay = self.__cur_reduction_set & other_reduction_set
         overlay_size = overlay.count(1)
@@ -58,30 +58,30 @@ class Reducer:
             self.__cur_reduction_set |= other_reduction_set
             self.__total_overlay += overlay_size
             self.__total_reduced += other_reduction_set_size
-            self.__cur_reduction_result = self.__reduction_strategy.reduce(
-                self.__cur_reduction_result,
+            self.__cur_reduction_values = self.__reduction_strategy.reduce(
+                self.__cur_reduction_values,
                 other.values
             )
 
     def clear_reduction_result(self) -> None:
         self.__cur_reduction_set = bitarray(self.__total_nodes)
         self.__cur_reduction_set.setall(0)
-        self.__cur_reduction_result = self.__reduction_strategy.generate_neutral()
+        self.__cur_reduction_values = self.__reduction_strategy.generate_neutral()
         self.__total_reduced = 0
         self.__total_overlay = 0
 
     def get_reduction_result(self) -> ReductionResult:
         return ReductionResult(
-            reduction_set_mask=self.__cur_reduction_set.tobytes(),
-            values=self.__cur_reduction_result,
+            reduction_set_mask=serialize(self.__cur_reduction_set),
+            values=self.__cur_reduction_values,
         )
 
     def get_reduction_values(self) -> ReductionValues:
-        return self.__cur_reduction_result
+        return self.__cur_reduction_values
 
     def get_global_reduction_result(self) -> GlobalReductionResult:
         return GlobalReductionResult(
-            self.__cur_reduction_result,
+            self.__cur_reduction_values,
             self.__total_reduced / self.__total_nodes,
             self.__total_overlay / self.__total_reduced,
         )
