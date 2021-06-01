@@ -2,7 +2,7 @@ import asyncio
 
 from google.protobuf.message import DecodeError
 
-from .reduction_pb2 import ReductionResult, IndividualValues
+from .reduction_pb2 import GroupReductionResult, IndividualValues
 from qnet2.network.scatter import Scatterer, MessageHandlerStrategy
 from .reduction import GlobalReducer
 from .state_machine import ReducerContext
@@ -11,7 +11,7 @@ from qnet2.config.net_config import Config
 
 
 class ReductionScatterer:
-    def scatter_group_result(self, reduction_result: ReductionResult) -> None:
+    def scatter_group_result(self, group_reduction_result: GroupReductionResult) -> None:
         pass
 
 
@@ -20,7 +20,7 @@ class DefaultReductionMessageHandler(MessageHandlerStrategy):
         self.__global_reducer = global_reducer
 
     def handle(self, data: bytes, source_node: int) -> None:
-        group_reduction = ReductionResult()
+        group_reduction = GroupReductionResult()
         try:
             group_reduction.ParseFromString(data)
             self.__global_reducer.apply_group_reduction(group_reduction)
@@ -35,7 +35,7 @@ class DefaultReductionScatterer(ReductionScatterer):
         self.__scatterer = scatterer
         self.__scatterer.set_handler_strategy(self.SCATTER_TOPIC, DefaultReductionMessageHandler(global_reducer))
 
-    def scatter_group_result(self, reduction_result: ReductionResult) -> None:
+    def scatter_group_result(self, reduction_result: GroupReductionResult) -> None:
         self.__scatterer.scatter_global(reduction_result.SerializeToString(), self.SCATTER_TOPIC)
 
 

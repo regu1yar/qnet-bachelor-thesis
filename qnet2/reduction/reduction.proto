@@ -43,6 +43,11 @@ message ReductionResult {
   ReductionValues values = 2;
 }
 
+message GroupReductionResult {
+  ReductionResult reduction_result = 1;
+  bool from_temporary_reducer = 2;
+}
+
 message IndividualValues {
   int64 node_id = 1;
   ReductionValues values = 2;
