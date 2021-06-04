@@ -2,21 +2,22 @@ import asyncio
 import typing as tp
 
 import reduction_pb2
-from .reduction_pb2 import NeighbourState, IndividualValues, REDUCER, BACKUP_REDUCER, OTHER
+from .reduction_pb2 import NeighbourState, IndividualValues, REDUCER, BACKUP_REDUCER, OTHER, GroupReductionResult
 from qnet2.utils.timer import RepeaterSyncCallback
 from .communication import ReductionScatterer, IndividualValueSender, IndividualValuesHandler
 from .designator import ReducerDesignator
 from qnet2.network.network import UDPServer
-from reduction import Reducer
+from reduction import ReducerFactory
 
 
 class ReducerContext:
-    __SCATTER_GROUP_RESULT_TIMEOUT = 10
+    __SCATTER_TIMEOUT = 10
     SERVER_PORT = 4202
 
-    def __init__(self, local_reducer: Reducer, scatterer: ReductionScatterer,
+    def __init__(self, reducer_factory: ReducerFactory, scatterer: ReductionScatterer,
                  local_sender: IndividualValueSender, init_state: State):
-        self.local_reducer = local_reducer
+        self.reducer_factory = reducer_factory
+        self.local_reducer = self.reducer_factory.create_reducer()
         self.__scatterer = scatterer
         self.local_sender = local_sender
         self.designator: tp.Optional[ReducerDesignator] = None
@@ -24,7 +25,7 @@ class ReducerContext:
         self.__state: tp.Optional[State] = None
 
         self.transition_to(init_state)
-        self.__scatter_repeater = RepeaterSyncCallback(self.__SCATTER_GROUP_RESULT_TIMEOUT, self.handle_scatter_timeout)
+        self.__scatter_repeater = RepeaterSyncCallback(self.__SCATTER_TIMEOUT, self.handle_scatter_timeout)
 
         self.__transport: tp.Optional[asyncio.BaseTransport] = None
         self.__run_server_task = asyncio.create_task(self.__run_server())
@@ -51,8 +52,11 @@ class ReducerContext:
         if self.__state is not None:
             self.__state.handle_scatter_timeout()
 
-    def scatter_reduction_result(self) -> None:
-        self.__scatterer.scatter_group_result(self.local_reducer.get_reduction_result())
+    def scatter_reduction_result(self, from_temporary_reducer: bool = False) -> None:
+        self.__scatterer.scatter_group_result(GroupReductionResult(
+            reduction_result=self.local_reducer.get_reduction_result(),
+            from_temporary_reducer=from_temporary_reducer
+        ))
 
 
 class State:
@@ -83,7 +87,7 @@ class ReducerState(State):
         elif to_state == BACKUP_REDUCER:
             self.context.transition_to(PreBackupState())
         elif to_state == OTHER:
-            self.context.transition_to(TempReducerState())
+            self.context.transition_to(TemporaryReducerState())
         else:
             raise NotImplementedError(
                 'Unexpected NeighbourState: {}'.format(reduction_pb2.NeighbourState.Name(to_state))
@@ -109,7 +113,7 @@ class PreBackupState(State):
         elif to_state == REDUCER:
             self.context.transition_to(ReducerState())
         elif to_state == OTHER:
-            self.context.transition_to(TempReducerState())
+            self.context.transition_to(TemporaryReducerState())
         else:
             raise NotImplementedError(
                 'Unexpected NeighbourState: {}'.format(reduction_pb2.NeighbourState.Name(to_state))
@@ -117,12 +121,12 @@ class PreBackupState(State):
 
     def handle_scatter_timeout(self) -> None:
         if self.context is not None:
-            self.context.scatter_reduction_result()
+            self.context.scatter_reduction_result(True)
             self.context.local_reducer.clear_reduction_result()
             self.context.transition_to(BackupState())
 
 
-class TempReducerState(State):
+class TemporaryReducerState(State):
     def __init__(self) -> None:
         super().__init__()
 
@@ -144,7 +148,7 @@ class TempReducerState(State):
 
     def handle_scatter_timeout(self) -> None:
         if self.context is not None:
-            self.context.scatter_reduction_result()
+            self.context.scatter_reduction_result(True)
             self.context.local_reducer.clear_reduction_result()
             self.context.transition_to(OtherState())
 
@@ -183,7 +187,7 @@ class OtherState(State):
         if self.context is None:
             return
         if self.context.designator is None or self.context.designator.get_reducer() < 0 or individual_values.ttl <= 0:
-            self.context.transition_to(TempReducerState())
+            self.context.transition_to(TemporaryReducerState())
             self.context.handle_individual_values(individual_values)
         else:
             individual_values.ttl -= 1
