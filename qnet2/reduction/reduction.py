@@ -54,7 +54,8 @@ class Reducer:
 
     def reduce_with(self, other: ReductionResult) -> None:
         if self.__cur_reduction_values is None:
-            self.__cur_reduction_values = self.__reduction_strategy.generate_neutral()
+            self.__cur_reduction_values = \
+                self.__reduction_strategy.generate_neutral()
 
         other_reduction_set = deserialize(other.reduction_set_mask)
         other_reduction_set_size = other_reduction_set.count(1)

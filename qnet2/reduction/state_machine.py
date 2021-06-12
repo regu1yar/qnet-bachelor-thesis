@@ -186,12 +186,17 @@ class OtherState(State):
     def handle_individual_values(self, individual_values: IndividualValues) -> None:
         if self.context is None:
             return
-        if self.context.designator is None or self.context.designator.get_reducer() < 0 or individual_values.ttl <= 0:
+        if self.context.designator is None or \
+                self.context.designator.get_reducer() < 0 or \
+                individual_values.ttl <= 0:
             self.context.transition_to(TemporaryReducerState())
             self.context.handle_individual_values(individual_values)
         else:
             individual_values.ttl -= 1
-            self.context.local_sender.send_individual_values(individual_values, self.context.designator.get_reducer())
+            self.context.local_sender.send_individual_values(
+                individual_values,
+                self.context.designator.get_reducer()
+            )
 
     def handle_state_transition(self, to_state: NeighbourState.V) -> None:
         if to_state == OTHER or self.context is None:

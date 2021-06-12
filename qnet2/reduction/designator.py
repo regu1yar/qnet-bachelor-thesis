@@ -44,7 +44,9 @@ class ReducerDesignator:
         self.__heartbeat_timer = RepeaterSyncCallback(self.__SEND_HEARTBEAT_TIMEOUT, self.__send_heartbeat, True)
         self.__availability_checker = RepeaterSyncCallback(self.__DEAD_TIMEOUT, self.__check_availability, False)
 
-    def handle_heartbeat(self, heartbeat: reduction_pb2.HeartbeatMessage, source_node: int) -> None:
+    def handle_heartbeat(self,
+                         heartbeat: reduction_pb2.HeartbeatMessage,
+                         source_node: int) -> None:
         self.__received_heartbeats[source_node] = heartbeat
         source_revision = NeighbourRevision(source_node, heartbeat.start_ts)
         if heartbeat.state == REDUCER:
@@ -96,14 +98,16 @@ class ReducerDesignator:
             return OTHER
 
     def __check_availability(self) -> None:
-        if not self.__is_node_alive(self.__reducer) or not self.__is_node_alive(self.__backup_reducer):
+        if not self.__is_node_alive(self.__reducer) or \
+                not self.__is_node_alive(self.__backup_reducer):
             self.__reelect()
         else:
             if not self.__is_in_state(self.__reducer.id, REDUCER):
                 self.__reducer_till_expiration -= 1
             if not self.__is_in_state(self.__backup_reducer.id, BACKUP_REDUCER):
                 self.__backup_till_expiration -= 1
-            if self.__reducer_till_expiration < 0 or self.__backup_till_expiration < 0:
+            if self.__reducer_till_expiration < 0 or \
+                    self.__backup_till_expiration < 0:
                 self.__reelect()
 
         self.__received_heartbeats.clear()
@@ -112,13 +116,16 @@ class ReducerDesignator:
         return node.id in self.__received_heartbeats and \
                node.start_ts == self.__received_heartbeats[node.id].start_ts
 
-    def __is_in_state(self, node_id: int, required_state: reduction_pb2.NeighbourState.V) -> bool:
+    def __is_in_state(self,
+                      node_id: int,
+                      required_state: reduction_pb2.NeighbourState.V) -> bool:
         if node_id not in self.__received_heartbeats:
             return False
         return self.__received_heartbeats[node_id].state == required_state
 
     def __reelect(self) -> None:
-        if not self.__is_node_alive(self.__reducer) or self.__reducer_till_expiration < 0:
+        if not self.__is_node_alive(self.__reducer) or \
+                self.__reducer_till_expiration < 0:
             self.__set_reducer(self.__backup_reducer)
             self.__set_backup(NeighbourRevision(-1, -1))
 
@@ -135,13 +142,12 @@ class ReducerDesignator:
             ),
             available_nodes,
         ))
-
         self_proclaimed_backups = set(filter(
             lambda node: self.__received_heartbeats[node].state == BACKUP_REDUCER,
             possible_backups
         ))
-
         self.__set_backup(self.__elect_from(possible_backups, self_proclaimed_backups))
+
         if self.__is_node_alive(self.__reducer):
             return
 
@@ -149,13 +155,14 @@ class ReducerDesignator:
             lambda node: node != self.__backup_reducer.id,
             available_nodes,
         ))
-
         self_proclaimed_reducers = set(filter(
             lambda node: self.__received_heartbeats[node].state == REDUCER,
             possible_reducers,
         ))
-
-        self.__set_reducer(self.__elect_from(possible_reducers, self_proclaimed_reducers))
+        self.__set_reducer(self.__elect_from(
+            possible_reducers,
+            self_proclaimed_reducers
+        ))
 
     def __set_reducer(self, node: NeighbourRevision) -> None:
         self.__reducer = node
@@ -175,7 +182,9 @@ class ReducerDesignator:
 
         self.__context.handle_state_transition(self.__get_state())
 
-    def __elect_from(self, possible: tp.Set[int], self_proclaimed: tp.Set[int]) -> NeighbourRevision:
+    def __elect_from(self,
+                     possible: tp.Set[int],
+                     self_proclaimed: tp.Set[int]) -> NeighbourRevision:
         new_elect = -1
         if len(self_proclaimed) != 0:
             new_elect = max(self_proclaimed)

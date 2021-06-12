@@ -113,13 +113,14 @@ class Scatterer:
 
         if message.topic in self.__last_seen_topics_ts and \
                 message.source_node in self.__last_seen_topics_ts[message.topic] and \
-                message.timestamp <= self.__last_seen_topics_ts[message.topic][message.source_node]:
+                message.timestamp <= \
+                self.__last_seen_topics_ts[message.topic][message.source_node]:
             return
-
         if message.topic not in self.__last_seen_topics_ts:
             self.__last_seen_topics_ts[message.topic] = {}
+        self.__last_seen_topics_ts[message.topic][message.source_node] = \
+            message.timestamp
 
-        self.__last_seen_topics_ts[message.topic][message.source_node] = message.timestamp
         next_hops: tp.Dict[int, network_pb2.ScatterMessage] = {}
         message.ttl -= 1
         if message.ttl <= 0:

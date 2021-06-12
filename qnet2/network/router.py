@@ -85,7 +85,9 @@ class Router:
         else:
             return self.__route_table.routes[target_group].next_hop
 
-    def handle_update(self, updated_routes: network_pb2.RouteTable, source_node: int) -> None:
+    def handle_update(self,
+                      updated_routes: network_pb2.RouteTable,
+                      source_node: int) -> None:
         emergency_updates: tp.Dict[int, network_pb2.Route] = {}
         for group, route in updated_routes.routes.items():
             self.__update_route(group, source_node, route, emergency_updates)
@@ -95,7 +97,8 @@ class Router:
     def __update_route(self, target_group: int, proposed_next_hop: int,
                        proposed_route: network_pb2.Route,
                        emergency_updates: tp.Dict[int, network_pb2.Route]) -> None:
-        proposed_metric = proposed_route.metric + self.__metric_service.get_direct_metric(proposed_next_hop)
+        proposed_metric = proposed_route.metric + \
+                          self.__metric_service.get_direct_metric(proposed_next_hop)
         proposed_length = proposed_route.length + 1
         if target_group not in self.__route_table.routes:
             self.__route_table.routes[target_group] = network_pb2.Route(
@@ -109,7 +112,8 @@ class Router:
         current_route = self.__route_table.routes[target_group]
         old_metric = current_route.metric
         if proposed_metric < current_route.metric or \
-                (proposed_metric == current_route.metric and proposed_length < current_route.length):
+                (proposed_metric == current_route.metric and
+                 proposed_length < current_route.length):
             current_route.next_hop = proposed_next_hop
             current_route.metric = proposed_metric
             current_route.length = proposed_length
@@ -117,7 +121,8 @@ class Router:
             current_route.metric = proposed_metric
             current_route.length = proposed_length
 
-        if abs(old_metric - current_route.metric) >= self.__get_emergency_metric_delta():
+        if abs(old_metric - current_route.metric) >= \
+                self.__get_emergency_metric_delta():
             emergency_updates[target_group] = current_route
 
     def __get_emergency_metric_delta(self) -> float:
